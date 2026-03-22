@@ -38,8 +38,6 @@ Finally run "/post_verify_button" to post the "Get Verified" button into the get
 Setup should be complete but I recommend double checking by going through the verification process on an alt account.
 
 # TODO:
-Code ONIDbot to record better logs  
-Code ONIDbot to search for ONID-Verified role on each server  
+Check through ONIDbot code to ensure it records good logs  
+Code ONIDbot to search for ONID-Verified role on each server by name  
 Code ONIDbot so get_user_info requires you yourself to be verified  
-Code ONIDbot to use COE SMTP server  
-Code ONIDbot so it checks the perms of environment.json and forces it to be secret  
