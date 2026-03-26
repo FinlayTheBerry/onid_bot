@@ -38,6 +38,6 @@ Finally run "/post_verify_button" to post the "Get Verified" button into the get
 Setup should be complete but I recommend double checking by going through the verification process on an alt account.
 
 # TODO:
-Check through ONIDbot code to ensure it records good logs  
-Code ONIDbot to search for ONID-Verified role on each server by name  
-Code ONIDbot so get_user_info requires you yourself to be verified  
+Check through ONIDbot code to ensure it records good logs.  
+Check through ONIDbot code to ensure stability even when Discord servers are not setup properly.  
+Add check for users who are already verified and check for servers which aren't set up right.  

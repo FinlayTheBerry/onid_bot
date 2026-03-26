@@ -92,14 +92,16 @@ def DB_Load():
     db_path = os.path.join(IO_GetScriptDir(), "database.json")
     if os.path.isfile(db_path):
         DB = IO_DeserializeJson(IO_ReadFile(db_path))
+        DB = { int(key): value for key, value in DB.items() }
     else:
         DB = {}
         DB_Save()
 def DB_Backup():
     db_path = os.path.join(IO_GetScriptDir(), "database.json")
-    backup_path = os.path.join(IO_GetScriptDir(), f"backups/{IO_GetEpoch()}.json")
+    backup_file_name = f"backups/{IO_GetEpoch()}.json"
+    backup_path = os.path.join(IO_GetScriptDir(), backup_file_name)
     IO_WriteFile(backup_path, IO_ReadFile(db_path))
-    Log_Info(f"Backed up database.json to {backup_path}.")
+    Log_Info(f"Backed up database.json to {backup_file_name}.")
 def DB_Save():
     db_path = os.path.join(IO_GetScriptDir(), "database.json")
     IO_WriteFile(db_path, IO_SerializeJson(DB))
@@ -109,7 +111,7 @@ def DB_Save():
         Log_Warning(f"{backups_dir_path} did not exist so it was created.")
     latest_backup_time = 0
     for backup_path in os.listdir(backups_dir_path):
-        if not os.path.isfile(backup_path):
+        if not os.path.isfile(os.path.join(backups_dir_path, backup_path)):
             Log_Warning(f"{backup_path} is not a file.")
             continue
         try:
@@ -136,9 +138,11 @@ def OSU_LookupOnidName(onid_email):
     response.raise_for_status()
     data = response.json()["data"]
 
-    # Manual Override For christj@oregonstate.edu
+    # Manual overrides
     if onid_email == "christj@oregonstate.edu":
         data = [ { "attributes": { "firstName": "Finlay", "lastName": "Christ" } } ]
+    elif onid_email == "indoor.rockclimbing@oregonstate.edu":
+        data = [ { "attributes": { "firstName": "Indoor", "lastName": "RockClimbing" } } ]
 
     # Return output or None
     if len(data) == 1:
@@ -163,8 +167,7 @@ def SMTP_SendEmail(to, subject, body, body_html):
     msg.add_alternative(body_html, subtype="html")
 
     with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as smtp_server:
-        smtp_server.set_debuglevel(1)
-        smtp_server.login(f"{ENV["email_username"]}@oregonstate.edu", ENV["email_password"])
+        smtp_server.login(ENV["email_username"], ENV["email_password"])
         smtp_server.send_message(msg)
 def SMTP_SendCode(to, code):
     body = IO_ReadFile(os.path.join(IO_GetScriptDir(), "email", "email.txt")).replace("##CODE##", code)
@@ -173,7 +176,7 @@ def SMTP_SendCode(to, code):
 # endregion
 
 # region Codes
-codes = {}
+REQUESTS = {}
 def GetRandomCode():
     charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     output = []
@@ -214,25 +217,20 @@ class OnidInputModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            # TODO
             onid_email = str(self.onid_input.value).strip().lower()
             if not onid_email.endswith("@oregonstate.edu") or len(onid_email) <= len("@oregonstate.edu"):
                 await interaction.followup.send(f"The ONID you entered doesn't look quite right. Please try again.", ephemeral=True, wait=True)
                 return
-            onid_name = await OSU_LookupOnidNameAsync(onid_email)
+            onid_name = OSU_LookupOnidName(onid_email)
             if onid_name == None:
                 await interaction.followup.send(f"The ONID you entered doesn't look quite right. Please try again.", ephemeral=True, wait=True)
-                return            
+                return
             code = GetRandomCode()
-            codes[interaction.user.id] = { "time": IO_GetEpoch(), "code": code, "onid_email": onid_email, "onid_name": onid_name }
-            Log_Info(f"Created code {code} for {interaction.user.mention} {interaction.user.id} on {interaction.guild.name} {interaction.guild.id} for {onid_name} {onid_email}")
-            
-            await discord_client.application.owner.send(f"{discord_client.application.owner.mention} YO MAMA SO FAT")
-
-            email = IO_ReadFile("./email/email.html").replace("##CODE##", str(code))
-            await MS_SendEmailAsync(onid_email, f"{code} - ONIDbot Verification Code", email)
-            await interaction.followup.send(f"A verification code has been sent to {onid_email}.\n\nPlease allow up to 15 minutes for the code to arive, and **check spam.**", ephemeral=True, wait=True)
-            # END TODO
+            request = { "time": IO_GetEpoch(), "code": code, "onid_email": onid_email, "onid_name": onid_name }
+            REQUESTS[interaction.user.id] = request
+            Log_Info(f"Created code {code} for @{interaction.user.name} <@{interaction.user.id}> on \"{interaction.guild.name}\" {interaction.guild.id} for \"{onid_name}\" {onid_email}")
+            SMTP_SendCode(onid_email, code)
+            await interaction.followup.send(f"{interaction.user.mention} A verification code has been sent to **{onid_email}**.\n\nCodes can take up to 5 minutes to arive. Check your **SPAM** folder before requesting another code.", ephemeral=True, wait=True)
         except BaseException as ex:
             Log_Exception(ex)
             raise ex
@@ -243,45 +241,37 @@ class CodeInputModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            # TODO
-            code = str(self.onid_input.value).strip()
-
-            if not len(code) == 6 or not code.isdigit():
-                await interaction.response.send_message(f"The code you entered doesn't look quite right. Please try again.", ephemeral=True)
+            code = str(self.code_input.value).strip().upper()
+            if not len(code) == 6 or not all([ c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" for c in code ]):
+                await interaction.followup.send(f"The code you entered doesn't look quite right. Please try again.", ephemeral=True, wait=True)
                 return
-
-            # TODO finish this
-            code_obj = Code_ParseAndVerify(code)
-            discord_id = code_obj["discord_id"]
-            onid_email = code_obj["onid_email"]
-
-            if not WatchDogInGoodStanding(discord_id):
-                return f"TOO MANY REQUESTS! Please wait 24 hours."
-            WatchDogPunish(discord_id)
-
-            DB_Set(discord_id, onid_email)
-
-            discord_server_obj = discord_client.get_guild(ENV["discord_server_id"])
-            if discord_server_obj is None:
-                discord_server_obj = await discord_client.fetch_guild(ENV["discord_server_id"])
-
-            discord_user_obj = discord_server_obj.get_member(discord_id)
-            if discord_user_obj is None:
-                discord_user_obj = await discord_server_obj.fetch_member(discord_id)
-
-            await discord_user_obj.add_roles(discord_verified_role)
-            await discord_user_obj.remove_roles(discord_unverified_role)
-            onid_name = await OSU_LookupOnidNameAsync(onid_email)
-            if onid_name == None:
-                print(f"Failed to lookup onid name for {onid_email}.")
-            else:
-                try:
-                    await discord_user_obj.edit(nick=onid_name)
-                except:
-                    print(f"Failed to nick {discord_id}.")
-
-            return f"Success your Discord account (@{discord_user_obj.name}) has been linked with your ONID email ({onid_email}).<br />You may now close this tab and return to Discord."
-            # END TODO
+            request = None
+            if interaction.user.id in REQUESTS:
+                request = REQUESTS[interaction.user.id]
+            if request == None or request["code"] != code or IO_GetEpoch() - request["time"] > 900:
+                await interaction.followup.send(f"The code you entered doesn't look quite right. Please try again.", ephemeral=True, wait=True)
+                return
+            Log_Info(f"Verified code {code} for @{interaction.user.name} <@{interaction.user.id}> on \"{interaction.guild.name}\" {interaction.guild.id} for \"{request["onid_name"]}\" {request["onid_email"]}")
+            DB[interaction.user.id] = request["onid_email"]
+            DB_Save()
+            verified_role = None
+            for guild_role in interaction.guild.roles:
+                if guild_role.name == "ONID-Verified":
+                    verified_role = guild_role
+                    break
+            if not verified_role:
+                await interaction.followup.send(f"This server doesn't have an \"ONID-Verified\" role to assign to you. A role with exactly this name must be present to complete verification. Please reach out to the server administrators to create this role.", ephemeral=True, wait=True)
+                return
+            await interaction.user.add_roles(verified_role)
+            try:
+                await interaction.user.edit(nick=request["onid_name"])
+            except discord.errors.Forbidden as ex:
+                if ex.text == "Missing Permissions":
+                    Log_Warning(f"Failed to nick @{interaction.user.name} <@{interaction.user.id}> to \"{request["onid_name"]}\" on \"{interaction.guild.name}\" {interaction.guild.id} due to insufficient permissions.")
+                else:
+                    raise ex
+            del REQUESTS[interaction.user.id]
+            await interaction.followup.send(f"{interaction.user.mention} You have successfully verified as {request["onid_email"]}.", ephemeral=True, wait=True)
         except BaseException as ex:
             Log_Exception(ex)
             raise ex
@@ -311,19 +301,13 @@ async def post_verification_buttons(interaction: discord.Interaction):
 async def get_user_info(interaction: discord.Interaction, user: discord.Member):
     try:
         await interaction.response.defer(ephemeral=True)
-        # TODO
-        if not interaction.user.is_verified:
-            await interaction.response.send_message("You must be verified by ONIDbot to run this command.", ephemeral=True)
+        if not interaction.user.id in DB:
+            await interaction.followup.send("You must be verified by ONIDbot to run this command.", ephemeral=True, wait=True)
             return
-        user_id = str(user.id)
-        user_mention = user.mention
-        verified_role = any([ role.id == discord_verified_role.id for role in user.roles ])
-        unverified_role = any([ role.id == discord_unverified_role.id for role in user.roles ])
-        onid_email = DB_Get(user_id)
-        onid_name = None if onid_email == None else await OSU_LookupOnidNameAsync(onid_email)
-        watchdog_requests = WatchDogQuery(user_id)
-        await interaction.response.send_message(f"User: {user_mention}\nUser ID: {user_id}\nVerified Role: {verified_role}\nUnverified Role: {unverified_role}\nONID: {onid_email}\nONID Name: {onid_name}\nWatchDog Requests: {watchdog_requests}", ephemeral=True)
-        # END TODO
+        if user.id in DB:
+            await interaction.followup.send(f"{user.mention} is verified as {DB[user.id]}.", ephemeral=True, wait=True)
+        else:
+            await interaction.followup.send(f"{user.mention} is not verified.", ephemeral=True, wait=True)
     except BaseException as ex:
         Log_Exception(ex)
         raise ex
