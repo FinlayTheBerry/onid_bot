@@ -174,7 +174,7 @@ def SMTP_SendEmail(to, subject, body, body_html):
     with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as smtp_server:
         smtp_server.login(ENV["email_username"], ENV["email_password"])
         smtp_server.send_message(msg)
-    
+
     Log_Info(f"Sent email to \"{to}\" with subject \"{subject}\".")
 def SMTP_SendCode(to, code):
     body = IO_ReadFile(os.path.join(IO_GetScriptDir(), "email", "email.txt")).replace("##CODE##", code)
@@ -351,7 +351,7 @@ START_TIME = IO_GetEpoch()
 IS_PRIMARY = False
 async def CLUSTER_GetLaunchTime(hostname):
     try:
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(hostname, ENV["cluster_port"]), timeout=3.0)
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(hostname, ENV["cluster_port"]), timeout=2.0)
         data = await reader.read(256)
         writer.close()
         await writer.wait_closed()
@@ -367,15 +367,15 @@ async def CLUSTER_HandleRequest(reader, writer):
         await writer.wait_closed()
 async def CLUSTER_Run():
     global IS_PRIMARY
-    
+
     my_hostname = socket.gethostname()
-    
+
     cluster_state = {}
     for hostname in ENV["cluster_hostnames"]:
         if hostname == my_hostname:
             continue
-        cluster_state[hostname] = (await CLUSTER_GetLaunchTime(hostname)) != None
-    
+        cluster_state[hostname] = (await CLUSTER_GetLaunchTime(hostname)) == float("inf")
+
     async with await asyncio.start_server(CLUSTER_HandleRequest, "0.0.0.0", ENV["cluster_port"]):
         print(f"Joined cluster on {my_hostname}:{ENV['cluster_port']}...")
 
@@ -389,17 +389,17 @@ async def CLUSTER_Run():
                 if peer_launch_time < min_peer_launch_time:
                     min_peer_launch_time = peer_launch_time
 
-                if cluster_state[hostname] != (peer_launch_time != None) and IS_PRIMARY:
-                    Log_Warning(f"Hostname {hostname} is now {'down' if (peer_launch_time == None) else 'up'}.")
-                cluster_state[hostname] = peer_launch_time != None
-            
+                if cluster_state[hostname] != (peer_launch_time == float("inf")) and IS_PRIMARY:
+                    Log_Warning(f"Hostname {hostname} is now {'down' if (peer_launch_time == float('inf')) else 'up'}.")
+                cluster_state[hostname] = peer_launch_time == float("inf")
+
             if START_TIME < min_peer_launch_time:
                 if not IS_PRIMARY:
                     IS_PRIMARY = True
                     Log_Info(f"{my_hostname} Taking over as primary...")
                     DB_Load()
                     asyncio.create_task(discord_client.start(ENV["discord_token"]))
-            
+
             await asyncio.sleep(ENV["heartbeat_interval"])
 # endregion
 
