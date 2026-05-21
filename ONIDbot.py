@@ -377,7 +377,7 @@ async def DIS_GetVerificationInfo(interaction: discord.Interaction, user: discor
 async def DIS_DebugVerification(interaction: discord.Interaction, command: str):
     try:
         await interaction.response.defer(ephemeral=True)
-        if not interaction.user.id in ENV["debug_users"]:
+        if not interaction.user.id in ENV["debug_user_ids"]:
             LOG_Info(f"Debug - Untrusted User - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
             await interaction.followup.send("You must be an ONIDbot developer to run this command.", ephemeral=True)
             return

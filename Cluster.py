@@ -13,7 +13,7 @@ import math
 # region File IO
 def IO_RealPath(filePath):
     return os.path.realpath(os.path.expanduser(filePath))
-def IO_GetScriptDir():
+def IO_GetEnvironmentDir():
     return os.path.dirname(IO_RealPath(__file__))
 def IO_WriteFile(filePath, contents, binary=False):
     filePath = IO_RealPath(filePath)
@@ -49,8 +49,6 @@ def IO_DeserializeJson(jsonString):
 def IO_GetEpoch():
     return time.time()
 def IO_FormatEpoch(epoch):
-    if epoch == float("inf") or epoch == float("-inf"):
-        return "NONE_TIME"
     timestamp = datetime.datetime.fromtimestamp(epoch)
     return timestamp.strftime("%I:%M%p %m/%d").lower()
 def RunCommand(command, echo=False, capture=False, input=None, check=True, env=None):
@@ -72,9 +70,9 @@ def RunCommand(command, echo=False, capture=False, input=None, check=True, env=N
 
 # region Logs
 def LOG_Generic(message, log_type, ansi_color):
-    formatted_message = f"{log_type} - {IO_FormatEpoch(IO_GetEpoch())} {int(IO_GetEpoch())} - {MY_HOSTNAME} - {message}"
+    formatted_message = f"{log_type} - {IO_FormatEpoch(IO_GetEpoch())} {int(IO_GetEpoch())} - {message}"
     print(f"\033[{ansi_color}m{formatted_message}\033[0m", flush=True)
-    log_path = os.path.join(IO_GetScriptDir(), "log.txt")
+    log_path = os.path.join(IO_GetEnvironmentDir(), "log.txt")
     if not os.path.exists(log_path):
         IO_CreateFile(log_path, f"{formatted_message}\n", 0o600)
     else:
@@ -87,27 +85,30 @@ def LOG_Error(message):
     LOG_Generic(message, "ERROR", "31")
 def LOG_Exception(ex):
     tb = ex.__traceback__
+    tb_data = None
     while tb is not None:
         if IO_RealPath(tb.tb_frame.f_code.co_filename) == IO_RealPath(__file__):
             message = repr(ex)
             funcname = "<module>" if tb.tb_frame.f_code.co_name == "<module>" else tb.tb_frame.f_code.co_name + "()"
             lineno = tb.tb_lineno
             line = IO_ReadFile(tb.tb_frame.f_code.co_filename).splitlines()[lineno - 1].strip()
-            LOG_Generic(f"{message} in {funcname} line {lineno}: {line}", "PY_EX", "31")
-            return
+            tb_data = { "message": message, "funcname": funcname, "lineno": lineno, "line": line }
         tb = tb.tb_next
-    LOG_Generic(f"{repr(ex)} at unknown location", "PY_EX", "31")
+    if tb_data == None:
+        LOG_Generic(f"{repr(ex)} at unknown location", "PY_EX", "31")
+    else:
+        LOG_Generic(f"{tb_data['message']} in {tb_data['funcname']} line {tb_data['lineno']}: {tb_data['line']}", "PY_EX", "31")
 # endregion
 
 # region Environment
 ENV = None
 def ENV_Load():
     global ENV
-    env_path = os.path.join(IO_GetScriptDir(), "environment.json")
+    env_path = os.path.join(IO_GetEnvironmentDir(), "environment.json")
     ENV = IO_DeserializeJson(IO_ReadFile(env_path))
     ENV['hosts'] = []
-    for i in range(len(ENV['hostnames'])):
-        ENV['hosts'].append( { "name": ENV['hostnames'][i], "ip": socket.gethostbyname(ENV['hostnames'][i]) } )
+    for i in range(len(ENV['cluster_hostnames'])):
+        ENV['cluster_hosts'].append( { "name": ENV['cluster_hostnames'][i], "ip": socket.gethostbyname(ENV['cluster_hostnames'][i]) } )
 # endregion
 
 # region State
@@ -131,7 +132,7 @@ def StartNode(host):
     RunCommand(command)
 
 async def SendRequest(host, request):
-    reader, writer = await asyncio.wait_for(asyncio.open_connection(host['ip'], ENV['port']), timeout=2.0)
+    reader, writer = await asyncio.wait_for(asyncio.open_connection(host['ip'], ENV['cluster_port']), timeout=2.0)
     try:
         writer.write((request + os.linesep).encode())
         await writer.drain()
@@ -177,7 +178,7 @@ async def GetHostStatus(host):
 async def Heartbeat():
     restart_needed = []
     min_birth = float("inf")
-    for host in ENV['hosts']:
+    for host in ENV['cluster_hosts']:
         if host['ip'] == MY_HOST['ip']:
             continue
         status = await GetHostStatus(host)
@@ -204,13 +205,13 @@ async def Heartbeat():
 
 # region PyCluster Launch Intents
 async def Run():
-    server = await asyncio.start_server(HandleRequest, "0.0.0.0", ENV['port'])
+    server = await asyncio.start_server(HandleRequest, "0.0.0.0", ENV['cluster_port'])
     try:
         LOG_Info(f"{MY_HOST['name']} joined cluster.")
         while True:
             try:
                 await Heartbeat()
-                await asyncio.sleep(ENV['interval'])
+                await asyncio.sleep(ENV['cluster_interval'])
             except Exception as ex:
                 LOG_Exception(ex)
     finally:
@@ -225,7 +226,7 @@ async def Run():
         except Exception as ex:
             LOG_Exception(ex)
 async def Start():
-    for host in ENV['hosts']:
+    for host in ENV['cluster_hosts']:
         status = await GetHostStatus(host)
         if status['reachable'] and not status['node_up']:
             print(f"Starting {host['name']}...")
@@ -234,26 +235,25 @@ async def Start():
     print("Started all hosts.")
 async def Stop():
     print("Disabling restart...")
-    for host in ENV['hosts']:
+    for host in ENV['cluster_hosts']:
         try:
             await SendRequest(host, "no_restart")
         except:
             pass
     print("Stopping cluster nodes...")
-    for host in ENV['hosts']:
+    for host in ENV['cluster_hosts']:
         try:
             await SendRequest(host, "stop")
         except:
             pass
     print("Cluster has been stopped.")
 async def Status():
-    # { "reachable": True, "node_up": False, "service_up": False, "birth": float("inf"), "no_restart": False }
     BLUE = "\033[1;34m"
     GREEN = "\033[1;32m"
     YELLOW = "\033[1;33m"
     RED = "\033[1;31m"
     RESET = "\033[0m"
-    for host in ENV['hosts']:
+    for host in ENV['cluster_hosts']:
         status = await GetHostStatus(host)
         if status['reachable'] and status['node_up'] and status['service_up'] and math.isfinite(status['birth']) and status['birth'] > 0 and not status['no_restart']:
             print(BLUE, end="")

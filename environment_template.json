@@ -14,5 +14,21 @@
     # This is the port used by the CGI-BIN script.
     "api_port": 12345,
     "signing_key": "A 256 bit random signing key as a hex string",
-    "encryption_key": "A 256 bit random encryption key as a hex string"
+    "encryption_key": "A 256 bit random encryption key as a hex string",
+    # These are the Discord IDs of users who can run the /debug_verification command
+    "debug_users": [ 123456 ],
+    "cluster_port": 12345,
+    "cluster_hostnames": [
+        "flip1.engr.oregonstate.edu",
+        "flip2.engr.oregonstate.edu",
+        "flip3.engr.oregonstate.edu",
+        "flip4.engr.oregonstate.edu"
+    ],
+    "cluster_interval": 60,
+    "service_check_command": "systemctl --user is-active --quiet ONIDbot.service",
+    "service_start_command": "systemctl --user start ONIDbot.service",
+    "service_stop_command": "systemctl --user stop ONIDbot.service",
+    "start_node_command": "ssh -o StrictHostKeyChecking='no' -o UserKnownHostsFile='/dev/null' -i 'PATH TO YOUR SSH PRIVATE KEY' '{HOST_IP}' screen -S PyCluster -d -m 'ROOTED PATH TO cluster.py' run",
+    "ping_host_command": "ping -c 1 -W 2 '{HOST_IP}'"
+
 }
