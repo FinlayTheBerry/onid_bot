@@ -2,40 +2,37 @@
 🛡️ ONIDbot is a free and [open-source](https://github.com/FinlayTheBerry/ONIDbot) Discord bot that verifies your server's members using their [onid@oregonstate.edu](https://onid.oregonstate.edu) email addresses.  
 👨‍💻 ONIDbot was developed by Finlay Christ, a cybersecurity major and president of the OSU Rock Climbing Club.  
 🗓️ ONIDbot has been protecting clubs at Oregon State University since 9/26/2025.  
-📈 ONIDbot has verified over 150 students and has blocked dozens of scammers and creeps.  
-🫶 ONIDbot proudly protects the OSU Rock Climbing Club, OSU Hiking Club, and OSU Conservation Club.  
+📈 ONIDbot has verified over 250 students and has blocked dozens of scammers and creeps.  
+🫶 ONIDbot proudly protects the OSU Rock Climbing Club, OSU Hiking Club, OSU Conservation Club, and OSU App Development Club.  
 
 # WHY USE ONIDbot?
 Posting your club's Discord server invite to social media is a great way to grow your community, but as soon as that link becomes public, anyone can join. OSU clubs specifically have seen a massive increase in scammers and creeps. ONIDbot keeps your club members safe by restricting the access given to non-students.  
 
 # HOW DO MEMBERS VERIFY?
-Verifying with ONIDbot is easy. New members press the "Get Verified!" button, enter their onid@oregonstate.edu email address, receive a link in their inbox, and click that link. Once clicked, verification is complete and they get access to your server. For members who have already verified on a different server, pressing "Get Verified!" instantly grants access to your server—no email required.
+Verifying with ONIDbot is easy. New members press the "Get Verified!" button, enter their onid@oregonstate.edu email address, receive a link in their inbox, and click that link. Once clicked, verification is complete and they get access to your server. For members who have already verified on a different server, pressing "Get Verified!" instantly grants access to your server-no email required.
 
 # ONIDbot SETUP:
 
 ### 1️⃣ Adding The Bot/Permissions:
 To add ONIDbot to your server, [click here](https://discord.com/oauth2/authorize?client_id=1487624623129497641) and follow Discord's instructions.  
 ONIDbot asks for three permissions, each of which is essential for the bot to function correctly:  
-- Manage Roles: Required to give members the "ONID-Verified" role after completing verification.  
-- Manage Nicknames (optional): Allows ONIDbot to change each member's nickname to their real name from the OSU directory.  
+- Manage Roles: Required to give members the "Verified" role after completing verification.  
 - Send Messages: Required to post the "Get Verified!" button so members can click it.  
-
-📝 NOTE: In addition to the Manage Nicknames permission, the ONIDbot role must be above each member's highest role in order to change their nickname.  
 
 ### 2️⃣ Roles Setup:
 Next, you will need to create a role that is given to verified members.  
 Go to Server Settings > Roles and press Create Role.  
-Name the role exactly "ONID-Verified" and give that role the following permissions:  
+Name the role exactly "Verified" and give that role the following permissions:  
 View Channels, Send Messages and Create Posts, Read Message History, Connect, Speak, and Use Voice Activity.  
 Then go to @everyone and press "Clear permissions" to remove all permissions.  
-📝 NOTE: The ONIDbot role must be dragged above the ONID-Verified role for ONIDbot to function correctly.  
+📝 NOTE: The ONIDbot role must be dragged above the Verified role for ONIDbot to function correctly.  
 
 ### 3️⃣ Get-Verified Channel Setup:
 Next, create a new channel called get-verified.  
 Go to Edit Channel > Permissions and set the following:  
 - @everyone is granted View Channel and Read Message History.  
 - @ONIDbot is granted Send Messages.  
-- @ONID-Verified is denied Send Messages.  
+- @Verified is denied Send Messages.  
 
 Finally, type "/post_verification_button" in the get-verified channel to create the "Get Verified!" button.  
 ONIDbot is now set up and verifying members!  
