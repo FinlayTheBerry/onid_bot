@@ -80,7 +80,7 @@ def IO_FormatEpoch(epoch):
 
 # region Logs
 def LOG_Generic(message, log_type):
-    formatted_message = "CGI - {} - {} {} - {}".format(log_type, IO_FormatEpoch(IO_GetEpoch()), int(IO_GetEpoch()), message)
+    formatted_message = "{} - {} {} - {}".format(log_type, IO_FormatEpoch(IO_GetEpoch()), int(IO_GetEpoch()), message)
     log_path = os.path.join(IO_GetEnvironmentDir(), "log.txt")
     if not os.path.exists(log_path):
         IO_CreateFile(log_path, "{}\n".format(formatted_message), 0o600)
@@ -140,7 +140,7 @@ def Main():
                 sockfile.close()
             if sock:
                 sock.close()
-    LOG_Error("All API cluster nodes are down!")
+    LOG_Error("CGI Main - All API cluster nodes are down!")
     return IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue.<br />Error details: All servers are down." }, compact=True)
 
 print("Content-Type: application/json")
@@ -150,4 +150,4 @@ try:
     print(Main())
 except Exception as ex:
     LOG_Exception(ex)
-    print(IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue.<br />Error details: An internal server error occured." }, compact=True))
+    print(IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue. Error details: An internal server error occurred." }, compact=True))
