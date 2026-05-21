@@ -141,7 +141,7 @@ def Main():
             if sock:
                 sock.close()
     LOG_Error("CGI Main - All API cluster nodes are down!")
-    return IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue.<br />Error details: All servers are down." }, compact=True)
+    return IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue. Error details: All servers are down." }, compact=True)
 
 print("Content-Type: application/json")
 print("")

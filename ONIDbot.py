@@ -436,8 +436,8 @@ async def DIS_DebugVerification(interaction: discord.Interaction, command: str):
                 await interaction.followup.send("Done!", ephemeral=True)
             elif verb == "dis_post_instructions":
                 discord_channel = await discord_client.fetch_channel(int(args))
-                message = f"Welcome to the {discord_channel.guild.name} Discord server!\n\n:shield: To gain access to the rest of the server, you must **verify** your status as an OSU student.\n\n:one: Enter your **@oregonstate.edu** email address and wait for a confirmation email.\n:two: Next, click the provided link and the rest of the server will be **unlocked** for you.\n\n:interrobang: If you need help, feel free to DM me (<@{discord_client.application.owner.id}>) anytime."
-                await discord_channel.send(message)
+                message = f"Welcome to the {interaction.guild.name} Discord server!\n\n:shield: To gain access to the rest of the server, you must **verify** your status as an OSU student.\n\n:one: Enter your **@oregonstate.edu** email address and wait for a confirmation email.\n:two: Next, click the provided link and the rest of the server will be **unlocked** for you.\n\n:interrobang: If you need help, feel free to DM me (<@{discord_client.application.owner.id}>) anytime."
+                await discord_channel.send(message, view=GetVerifiedView())
                 await interaction.followup.send("Done!", ephemeral=True)
             elif verb == "osu_api_lookup":
                 data = OSU_LookupOnidName(args)
