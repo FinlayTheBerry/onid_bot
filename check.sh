@@ -13,5 +13,6 @@ done
 echo ""
 ~/PyCluster/PyCluster.py status
 echo ""
-echo "Last backup: $(date -d @$(ls -S ~/ONIDbot/backups/ | head -n 1 | sed 's/\.json$//'))"
+LAST_BACKUP=$(ls -S ~/ONIDbot/backups/ | head -n 1 | sed 's/\.json$//')
+echo "Last backup - $(date -d @$LAST_BACKUP)" - $(python -c "import time; print(format((time.time() - $LAST_BACKUP) / 86400, '.2f'))") days ago
 echo ""

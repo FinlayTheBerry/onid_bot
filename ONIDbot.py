@@ -112,20 +112,30 @@ def DB_Load():
     DB = { int(key): value for key, value in DB.items() }
 def DB_Backup():
     db_path = os.path.join(IO_GetEnvironmentDir(), "database.json")
-    backup_file_name = f"backups/{int(IO_GetEpoch())}.json"
-    backup_path = os.path.join(IO_GetEnvironmentDir(), backup_file_name)
+    backups_dir_path = os.path.join(IO_GetEnvironmentDir(), "backups")
+    if not os.path.exists(backups_dir_path):
+        os.mkdir(backups_dir_path, mode=0o700)
+    backup_path = os.path.join(backups_dir_path, f"{int(IO_GetEpoch())}.json")
     IO_CreateFile(backup_path, IO_ReadFile(db_path), 0o600)
 def DB_Save():
     db_path = os.path.join(IO_GetEnvironmentDir(), "database.json")
     IO_WriteFile(db_path, IO_SerializeJson(DB))
     backups_dir_path = os.path.join(IO_GetEnvironmentDir(), "backups")
-    latest_backup_time = 0
-    for backup_name in os.listdir(backups_dir_path):
-        backup_time = int(os.path.splitext(backup_name)[0])
-        if backup_time > latest_backup_time:
-            latest_backup_time = backup_time
+    latest_backup_time = float("-inf")
+    if os.path.exists(backups_dir_path):
+        for backup_name in os.listdir(backups_dir_path):
+            backup_time = int(os.path.splitext(backup_name)[0])
+            if backup_time > latest_backup_time:
+                latest_backup_time = backup_time
     if int(IO_GetEpoch()) - latest_backup_time > 24 * 60 * 60:
         DB_Backup()
+def DB_Set(discord_user_id, onid_email, onid_name, notes=None):
+    if discord_user_id in DB and notes == None:
+        notes = DB[discord_user_id]['notes']
+    elif notes == None:
+        notes = ""
+    DB[discord_user_id] = { "onid_email": onid_email, "onid_name": onid_name, "notes": notes }
+    DB_Save()
 # endregion
 
 # region OSU API
@@ -200,19 +210,46 @@ def TOKEN_IsExpired(data):
     return False
 # endregion
 
-# region Discord
 discord_client = discord.Client(intents=discord.Intents.default())
 discord_command_tree = discord.app_commands.CommandTree(discord_client)
 
+# region Discord Helpers
 def DIS_FormatUser(user):
     return f"User(\"{user.display_name}\", \"{user.name}\", {user.id})"
 def DIS_FormatChannel(channel):
     return f"Channel(\"{channel.name}\", {channel.id})"
 def DIS_FormatGuild(guild):
     return f"Guild(\"{guild.name}\", {guild.id})"
+async def DIS_FetchGuild(guild_id):
+    guild = discord_client.get_guild(guild_id)
+    if guild is None:
+        guild = await discord_client.fetch_guild(guild_id)
+    return guild
+async def DIS_FetchChannel(channel_id):
+    channel = discord_client.get_channel(channel_id)
+    if channel is None:
+        channel = await discord_client.fetch_channel(channel_id)
+    return channel
+async def DIS_FetchUser(user_id):
+    user = discord_client.get_user(user_id)
+    if user is None:
+        user = await discord_client.fetch_user(user_id)
+    return user
+async def DIS_FetchMember(member_id, guild):
+    member = guild.get_member(member_id)
+    if member is None:
+        member = await guild.fetch_member(member_id)
+    return member
+def DIS_GetVerifiedRole(guild):
+    for role in guild.roles:
+        if role.name.lower() == "verified":
+            return role
+    return role
+# endregion
 
+# region Discord Interactions
 @discord_client.event
-async def on_ready(): 
+async def on_ready():
     try:
         await discord_command_tree.sync()
         discord_client.add_view(GetVerifiedView())
@@ -222,20 +259,19 @@ async def on_ready():
         LOG_Exception(ex)
         raise
 @discord_client.event
-async def on_guild_join(guild: discord.Guild): 
+async def on_guild_join(guild: discord.Guild):
     LOG_Info(f"Join Guild - {DIS_FormatGuild(guild)}")
-
 class GetVerifiedView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
     @discord.ui.button(label="Get Verified!", style=discord.ButtonStyle.primary, emoji="🛡️", custom_id="get_verified_button")
-    async def DIS_GetVerifiedButton(self, interaction: discord.Interaction, button: discord.ui.Button): 
+    async def DIS_GetVerifiedButton(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             already_verified = interaction.user.id in DB and interaction.user.id != discord_client.application.owner.id
             if already_verified:
                 await interaction.response.defer(ephemeral=True)
-                LOG_Info(f"Get Verified - Refreshing Verification - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
-                error = await DIS_Verify(interaction.user.id, interaction.guild.id, DB[interaction.user.id]['onid_email'], DB[interaction.user.id]['onid_name'])
+                LOG_Info(f"Get Verified - Refreshed Verification - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
+                error = await DIS_Verify(interaction.user.id, interaction.guild.id, DB[interaction.user.id]['onid_email'], DB[interaction.user.id]['onid_name'], refresh=True)
                 if error == None:
                     await interaction.followup.send("You are already verified with ONIDbot and have been given the ONID-Verified role on this server.", ephemeral=True)
                 else:
@@ -250,17 +286,13 @@ class OnidInputModal(discord.ui.Modal):
     def __init__(self):
         super().__init__(title="Enter OSU Email", custom_id="onid_input_modal", timeout=None)
     onid_input = discord.ui.TextInput(label="Enter your @oregonstate.edu email address:", placeholder="onid@oregonstate.edu", required=True, custom_id="onid_text_input")
-    async def on_submit(self, interaction: discord.Interaction): 
+    async def on_submit(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
             already_verified = interaction.user.id in DB and interaction.user.id != discord_client.application.owner.id
             if already_verified:
-                LOG_Info(f"Onid Input - Refreshing Verification - \"{self.onid_input.value}\" - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
-                error = await DIS_Verify(interaction.user.id, interaction.guild.id, DB[interaction.user.id]['onid_email'], DB[interaction.user.id]['onid_name'])
-                if error == None:
-                    await interaction.followup.send("You are already verified with ONIDbot and have been given the ONID-Verified role on this server.", ephemeral=True)
-                else:
-                    await interaction.followup.send(f"An error occurred. Please DM @finlaytheberry if the issue persists. Error details: {error}", ephemeral=True)
+                LOG_Info(f"Onid Input - Already Verified - \"{self.onid_input.value}\" - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
+                return # Ignore interaction
             else:
                 onid_email = str(self.onid_input.value).strip().lower()
                 if not onid_email.endswith("@oregonstate.edu"):
@@ -273,7 +305,7 @@ class OnidInputModal(discord.ui.Modal):
                     await interaction.followup.send(f"The email address you entered could not be found in the OSU Directory. Please try again.", ephemeral=True)
                     return
                 LOG_Info(f"Onid Input - Sending Email - \"{self.onid_input.value}\" - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
-                data = { "discord_guild_id": interaction.guild.id, "discord_user_id": interaction.user.id, "onid_email": onid_email, "onid_name": onid_name }
+                data = { "guild_id": interaction.guild.id, "user_id": interaction.user.id, "onid_email": onid_email, "onid_name": onid_name }
                 token = TOKEN_SerializeAndSign(data)
                 LOG_Info(f"Token Create - {token} - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
                 subject = IO_ReadFile(os.path.join(IO_GetEnvironmentDir(), "email", "subject.txt")).replace("{TOKEN}", token).replace("{ENV_NAME}", os.path.basename(os.getcwd()))
@@ -284,9 +316,8 @@ class OnidInputModal(discord.ui.Modal):
         except Exception as ex:
             LOG_Exception(ex)
             raise
-
-@discord_command_tree.command(name="post_verification_button", description="Posts the verification button in the current channel.")
-async def DIS_PostVerificationButton(interaction: discord.Interaction): 
+@discord_command_tree.command(name="post_verification_button", description="Posts the verification instructions and button in the current channel.")
+async def DIS_PostVerificationButton(interaction: discord.Interaction):
     try:
         await interaction.response.defer(ephemeral=True)
         if not interaction.user.guild_permissions.administrator:
@@ -294,7 +325,8 @@ async def DIS_PostVerificationButton(interaction: discord.Interaction):
             await interaction.followup.send("You need the administrator permission on this server to run this command.")
             return
         try:
-            await interaction.channel.send("", view=GetVerifiedView())
+            message = f"Welcome to the {interaction.guild.name} Discord server!\n\n:shield: To gain access to the rest of the server, you must **verify** your status as an OSU student.\n\n:one: Enter your **@oregonstate.edu** email address and wait for a confirmation email.\n:two: Next, click the provided link and the rest of the server will be **unlocked** for you.\n\n:interrobang: If you need help, feel free to DM me (<@{discord_client.application.owner.id}>) anytime."
+            await interaction.channel.send(message, view=GetVerifiedView())
         except discord.errors.Forbidden as ex:
             LOG_Info(f"Post Button - No Permission - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
             await interaction.followup.send(f"{discord_client.user.mention} does not have permission to post messages in this channel and therefore could not post the verification buttons.", ephemeral=True)
@@ -305,18 +337,18 @@ async def DIS_PostVerificationButton(interaction: discord.Interaction):
         LOG_Exception(ex)
         raise
 @discord_command_tree.command(name="get_verification_info", description="Prints all the information ONIDbot has about a given Discord user.")
-async def DIS_GetVerificationInfo(interaction: discord.Interaction, user: discord.User): 
+async def DIS_GetVerificationInfo(interaction: discord.Interaction, user: discord.User):
     try:
         await interaction.response.defer(ephemeral=True)
         if not interaction.user.id in DB:
-            LOG_Info(f"Get Info - Not Verified - {DIS_FormatUser(interaction.user)} - {DIS_FormatUser(user)} - {DIS_FormatGuild(interaction.guild)}")
+            LOG_Warning(f"Get Info - Requester Not Verified - {DIS_FormatUser(interaction.user)} - {DIS_FormatUser(user)} - {DIS_FormatGuild(interaction.guild)}")
             await interaction.followup.send("You must be verified by ONIDbot to run this command.", ephemeral=True)
             return
-        if user.id in DB:
-            LOG_Info(f"Get Info - Done! (yes) - {DIS_FormatUser(interaction.user)} - {DIS_FormatUser(user)} - {DIS_FormatGuild(interaction.guild)}")
+        elif user.id in DB:
+            LOG_Info(f"Get Info - User Verified - {DIS_FormatUser(interaction.user)} - {DIS_FormatUser(user)} - \"{DB[user.id]['onid_name']}\" {DB[user.id]['onid_email']} - {DIS_FormatGuild(interaction.guild)}")
             await interaction.followup.send(f"{user.mention} is verified as \"{DB[user.id]['onid_name']}\" {DB[user.id]['onid_email']}.", ephemeral=True)
         else:
-            LOG_Info(f"Get Info - Done! (no) - {DIS_FormatUser(interaction.user)} - {DIS_FormatUser(user)} - {DIS_FormatGuild(interaction.guild)}")
+            LOG_Info(f"Get Info - User Not Verified - {DIS_FormatUser(interaction.user)} - {DIS_FormatUser(user)} - {DIS_FormatGuild(interaction.guild)}")
             await interaction.followup.send(f"{user.mention} is not verified.", ephemeral=True)
     except Exception as ex:
         LOG_Exception(ex)
@@ -337,7 +369,16 @@ async def DIS_DebugVerification(interaction: discord.Interaction, command: str):
             if len(command) > 1:
                 args = command[1]
 
-            if verb == "token_info":
+            if verb == "rename_role":
+                discord_guild_id = args.split(" ", maxsplit=1)[0]
+                guild = await DIS_FetchGuild(discord_guild_id)
+                for role in guild.roles:
+                    if role.name == "ONID-Verified":
+                        await role.edit(name="Verified")
+                        await interaction.followup.send("Done!", ephemeral=True)
+                        return
+                await interaction.followup.send("No role with target name :(", ephemeral=True)
+            elif verb == "token_info":
                 data = TOKEN_DeserializeAndVerify(args)
                 await interaction.followup.send(IO_SerializeJson(data), ephemeral=True)
             elif verb == "db_unverify":
@@ -400,51 +441,6 @@ async def DIS_DebugVerification(interaction: discord.Interaction, command: str):
     except Exception as ex:
         LOG_Exception(ex)
         raise
-
-async def DIS_Verify(discord_user_id, discord_guild_id, onid_email, onid_name): 
-    if not discord_user_id in DB:
-        DB[discord_user_id] = { "onid_email": onid_email, "onid_name": onid_name, "notes": "" }
-        DB_Save()
-
-    discord_guild = discord_client.get_guild(discord_guild_id)
-    if discord_guild is None:
-        discord_guild = await discord_client.fetch_guild(discord_guild_id)
-    if discord_guild is None:
-        LOG_Warning(f"Guild Lookup - {discord_guild_id}")
-        return "Failed to lookup guild from token data."
-
-    discord_user = discord_guild.get_member(discord_user_id)
-    if discord_user is None:
-        discord_user = await discord_guild.fetch_member(discord_user_id)
-    if discord_user is None:
-        LOG_Warning(f"User Lookup - {discord_user_id} - {DIS_FormatGuild(discord_guild)}")
-        return "Failed to lookup user from token data."
-
-    verified_role = None
-    for guild_role in discord_guild.roles:
-        if guild_role.name == "ONID-Verified":
-            verified_role = guild_role
-            break
-    if verified_role == None:
-        LOG_Warning(f"Missing Role - {DIS_FormatUser(discord_user)} - {DIS_FormatGuild(discord_guild)}")
-        return "ONID-Verified role does not exist."
-    
-    try:
-        await discord_user.add_roles(verified_role)
-    except discord.errors.Forbidden as ex:
-        LOG_Warning(f"Missing Perms - Manage Roles - {DIS_FormatUser(discord_user)} - {DIS_FormatGuild(discord_guild)}")
-        return "Failed to assign ONID-Verified role due to missing permissions."
-    
-    try:
-        await discord_user.edit(nick=DB[discord_user_id]['onid_name'])
-    except discord.errors.Forbidden as ex:
-        LOG_Warning(f"Missing Perms - Manage Nicknames - {DIS_FormatUser(discord_user)} - {DIS_FormatGuild(discord_guild)}")
-    except Exception as ex:
-        LOG_Exception(ex)
-        # Non-fatal
-
-    LOG_Info(f"Verified - {DIS_FormatUser(discord_user)} - {DIS_FormatGuild(discord_guild)}")
-    return None
 # endregion
 
 # region API Server
@@ -452,20 +448,45 @@ async def API_ProcessRequest(request):
     try:
         data = TOKEN_DeserializeAndVerify(request)
         if data is None:
+            LOG_Warning(f"API - Invalid Token - {request}")
             return "error", "An Error Occurred", f"Please DM @finlaytheberry to report this issue.<br />Error details: Invalid token."
         if TOKEN_IsExpired(data):
+            LOG_Warning(f"API - Expired Token - {IO_SerializeJson(data, compact=True)}")
             return "error", "Link Expired", "This link has expired. Please request a new one from ONIDbot."
-        await DIS_Verify(data['discord_user_id'], data['discord_guild_id'], data['onid_email'], data['onid_name'])
+
+        DB_Set(data['user_id'], data['guild_id'], data['onid_name'])
+
+        guild = DIS_FetchGuild(data['guild_id'])
+        if guild == None:
+            LOG_Warning(f"API - Bad Guild ID - {IO_SerializeJson(data, compact=True)}")
+            return "error", "An Error Occurred", f"Please DM @finlaytheberry to report this issue.<br />Error details: Non-existent Discord server."
+        member = DIS_FetchMember(data['user_id'], guild)
+        if guild == None:
+            LOG_Warning(f"API - Bad User ID - {DIS_FormatGuild(guild)} - {IO_SerializeJson(data, compact=True)}")
+            return "error", "An Error Occurred", f"Please DM @finlaytheberry to report this issue.<br />Error details: Non-existent Discord user."
+
+        verified_role = DIS_GetVerifiedRole(guild)
+        if verified_role == None:
+            LOG_Warning(f"API - Role Missing - {DIS_FormatUser(member)} - {DIS_FormatGuild(guild)} - {IO_SerializeJson(data, compact=True)}")
+            return "error", "Verified Role Missing", f"ONIDbot was unable to assign you the Verified role on the {guild.name} Discord server because a role with that name does not exist.<br />Please DM the administrators of the {guild.name} Discord server to report this issue."
+        try:
+            await member.add_roles(verified_role)
+        except discord.errors.Forbidden as ex:
+            LOG_Warning(f"API - No Manage Roles Perm - {DIS_FormatUser(member)} - {DIS_FormatGuild(guild)} - {IO_SerializeJson(data, compact=True)}")
+            return "error", "Bot Missing Permission", f"ONIDbot was unable to assign you the Verified role on the {guild.name} Discord server because the manage roles permission has not been granted or the ONIDbot role is below the Verified role.<br />Please DM the administrators of the {guild.name} Discord server to report this issue."
+        
+        LOG_Info(f"API - Verified - {DIS_FormatUser(member)} - {DIS_FormatGuild(guild)} - {IO_SerializeJson(data, compact=True)}")
         return "success", "Verified!", "You have been verified with <strong>ONIDbot</strong>. You can safely close this window and return to Discord."
     except Exception as ex:
-        return "error", "An Error Occurred", f"Please DM @finlaytheberry to report this issue.<br />Error details: {str(ex)}"
+        LOG_Exception(ex)
+        return "error", "An Error Occurred", f"Please DM @finlaytheberry to report this issue.<br />Error details: An internal server error occured."
 async def API_ClientHandler(reader, writer):
     try:
         try:
             request = (await asyncio.wait_for(reader.readline(), timeout=2.0)).decode("utf-8").rstrip("\n")
             state, title, message = await API_ProcessRequest(request)
-            response = IO_SerializeJson({ "state": state, "title": title, "message": message }, compact=True) + "\n"
-            writer.write(response.encode("utf-8"))
+            response = (IO_SerializeJson({ "state": state, "title": title, "message": message }, compact=True) + "\n").encode("utf-8")
+            writer.write(response)
             await asyncio.wait_for(writer.drain(), timeout=2.0)
         finally:
             writer.close()
@@ -482,10 +503,6 @@ async def API_RunServer():
 # region Main
 async def Main():
     try:
-        LOG_Info("test info")
-        LOG_Warning("test warning")
-        LOG_Error("test error")
-        raise Exception("test exception")
         ENV_Load()
         DB_Load()
         await asyncio.gather(API_RunServer(), discord_client.start(ENV['discord_token']))
