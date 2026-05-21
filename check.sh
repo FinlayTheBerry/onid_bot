@@ -1,5 +1,7 @@
 #!/bin/sh
 
+cd "$(dirname "$0")"
+
 reset
 tail -n 200 ./log.txt | while read -r line; do
   if [[ "$line" == *"ERROR - "* ]] || [[ "$line" == *"PY_EX - "* ]]; then
