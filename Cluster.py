@@ -49,6 +49,8 @@ def IO_DeserializeJson(jsonString):
 def IO_GetEpoch():
     return time.time()
 def IO_FormatEpoch(epoch):
+    if epoch == float("inf") or epoch == float("-inf"):
+        return "NONE_TIME"
     timestamp = datetime.datetime.fromtimestamp(epoch)
     return timestamp.strftime("%I:%M%p %m/%d").lower()
 def RunCommand(command, echo=False, capture=False, input=None, check=True, env=None):
@@ -106,7 +108,7 @@ def ENV_Load():
     global ENV
     env_path = os.path.join(IO_GetEnvironmentDir(), "environment.json")
     ENV = IO_DeserializeJson(IO_ReadFile(env_path))
-    ENV['hosts'] = []
+    ENV['cluster_hosts'] = []
     for i in range(len(ENV['cluster_hostnames'])):
         ENV['cluster_hosts'].append( { "name": ENV['cluster_hostnames'][i], "ip": socket.gethostbyname(ENV['cluster_hostnames'][i]) } )
 # endregion
@@ -191,15 +193,15 @@ async def Heartbeat():
 
     if eldest:
         if not service_up:
-            LOG_Info(f"{MY_HOST['name']} is eldest but service is down. Starting...")
+            LOG_Info(f"Cluster Start Service - {MY_HOST['name']}")
             StartService()
         if not NO_RESTART and IO_GetEpoch() - min(START_TIME, min_birth) > 10:
             for host in restart_needed:
-                LOG_Info(f"{MY_HOST['name']} is eldest restarting {host['name']}...")
+                LOG_Info(f"Cluster Restarting Node - {MY_HOST['name']} - {host['name']}...")
                 StartNode(host)
     elif not eldest:
         if service_up:
-            LOG_Error(f"{MY_HOST['name']} is not eldest but service is up. Killing...")
+            LOG_Error(f"Cluster Stopping Service - {MY_HOST['name']}")
             StopService()
 # endregion
 
@@ -207,7 +209,7 @@ async def Heartbeat():
 async def Run():
     server = await asyncio.start_server(HandleRequest, "0.0.0.0", ENV['cluster_port'])
     try:
-        LOG_Info(f"{MY_HOST['name']} joined cluster.")
+        LOG_Info(f"Cluster Join - {MY_HOST['name']}")
         while True:
             try:
                 await Heartbeat()

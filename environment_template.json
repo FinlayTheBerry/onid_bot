@@ -30,5 +30,4 @@
     "service_stop_command": "systemctl --user stop ONIDbot.service",
     "start_node_command": "ssh -o StrictHostKeyChecking='no' -o UserKnownHostsFile='/dev/null' -i 'PATH TO YOUR SSH PRIVATE KEY' '{HOST_IP}' screen -S PyCluster -d -m 'ROOTED PATH TO cluster.py' run",
     "ping_host_command": "ping -c 1 -W 2 '{HOST_IP}'"
-
 }

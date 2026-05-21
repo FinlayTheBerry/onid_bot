@@ -59,6 +59,8 @@ def IO_DeserializeJson(jsonString):
 def IO_GetEpoch():
     return time.time()
 def IO_FormatEpoch(epoch):
+    if epoch == float("inf") or epoch == float("-inf"):
+        return "NONE_TIME"
     timestamp = datetime.datetime.fromtimestamp(epoch)
     return timestamp.strftime("%I:%M%p %m/%d").lower()
 # endregion
