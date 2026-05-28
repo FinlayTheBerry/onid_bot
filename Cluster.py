@@ -58,8 +58,7 @@ def RunCommand(command, echo=False, capture=False, input=None, check=True, env=N
         raise Exception("Command cannot be run with both echo and capture.")
     result = subprocess.run(command, stdout=(None if echo else subprocess.PIPE), stderr=(None if echo else subprocess.STDOUT), input=input, env=env, check=False, shell=True, text=True)
     if check and result.returncode != 0:
-        LOG_Error(result.stdout)
-        raise Exception(f"Sub-process returned non-zero exit code.\nExitCode: {result.returncode}\nCmdLine: {command}")
+        raise Exception(f"Sub-process returned non-zero exit code.\nExitCode: {result.returncode}\nCmdLine: {command}\n\n{result.stdout}")
     if capture and not check:
         return result.stdout.strip(), result.returncode
     elif capture:
@@ -74,7 +73,7 @@ def RunCommand(command, echo=False, capture=False, input=None, check=True, env=N
 def LOG_Generic(message, log_type, ansi_color):
     formatted_message = f"{log_type} - {IO_FormatEpoch(IO_GetEpoch())} {int(IO_GetEpoch())} - {message}"
     print(f"\033[{ansi_color}m{formatted_message}\033[0m", flush=True)
-    log_path = os.path.join(IO_GetEnvironmentDir(), "log.txt")
+    log_path = os.path.join(IO_GetEnvironmentDir(), "Cluster.log")
     if not os.path.exists(log_path):
         IO_CreateFile(log_path, f"{formatted_message}\n", 0o600)
     else:
@@ -113,12 +112,19 @@ def ENV_Load():
         ENV['cluster_hosts'].append( { "name": ENV['cluster_hostnames'][i], "ip": socket.gethostbyname(ENV['cluster_hostnames'][i]) } )
 # endregion
 
-# region State
+# region State And Constants
+BLUE = "\033[1;34m"
+GREEN = "\033[1;32m"
+YELLOW = "\033[1;33m"
+RED = "\033[1;31m"
+RESET = "\033[0m"
+
 START_TIME = IO_GetEpoch()
 MY_HOSTNAME = socket.gethostname()
 MY_HOST = { "name": MY_HOSTNAME, "ip": socket.gethostbyname(MY_HOSTNAME) }
 
 NO_RESTART = False
+LAST_STATE = None
 # endregion
 
 # region PyCluster Helpers
@@ -163,7 +169,7 @@ def InvokeRequest(request):
         return IO_SerializeJson({ "reachable": True, "node_up": True, "service_up": service_up, "birth": START_TIME, "no_restart": NO_RESTART }, compact=True)
     elif request == "no_restart":
         NO_RESTART = True
-        return ""
+        return "OK"
     elif request == "stop":
         return "BYE"
     else:
@@ -174,48 +180,73 @@ async def GetHostStatus(host):
         return { "reachable": False, "node_up": False, "service_up": False, "birth": float("inf"), "no_restart": False }
     try:
         return IO_DeserializeJson(await SendRequest(host, "status"))
-    except:
+    except ConnectionRefusedError:
+        # Service Unreachable
         return { "reachable": True, "node_up": False, "service_up": False, "birth": float("inf"), "no_restart": False }
+# endregion
 
-async def Heartbeat():
-    restart_needed = []
-    min_birth = float("inf")
+# region PyCluster Launch Intents
+async def RunUpdate():
+    global LAST_STATE
+
+    state = []
     for host in ENV['cluster_hosts']:
         if host['ip'] == MY_HOST['ip']:
             continue
         status = await GetHostStatus(host)
-        if status['birth'] < min_birth:
-            min_birth = status['birth']
-        if status['reachable'] and not status['node_up']:
-            restart_needed.append(host)
-    eldest = START_TIME < min_birth
+        state.append((host, status))
     service_up = CheckService()
+    eldest = START_TIME < min([ status['birth'] for host, status in state ])
 
     if eldest:
         if not service_up:
-            LOG_Info(f"Cluster Start Service - {MY_HOST['name']}")
-            StartService()
-        if not NO_RESTART and IO_GetEpoch() - min(START_TIME, min_birth) > 10:
-            for host in restart_needed:
-                LOG_Info(f"Cluster Restarting Node - {MY_HOST['name']} - {host['name']}...")
-                StartNode(host)
+            LOG_Info(f"Starting Service - {MY_HOST['name']}")
+            try:
+                StartService()
+            except Exception as ex:
+                LOG_Exception(ex)
     elif not eldest:
         if service_up:
-            LOG_Error(f"Cluster Stopping Service - {MY_HOST['name']}")
-            StopService()
-# endregion
+            LOG_Error(f"Stopping Service - {MY_HOST['name']}")
+            try:
+                StopService()
+            except Exception as ex:
+                LOG_Exception(ex)
 
-# region PyCluster Launch Intents
+    if eldest and not NO_RESTART and IO_GetEpoch() - START_TIME > 5:
+        for host, status in state:
+            if status['reachable'] and not status['node_up']:
+                LOG_Info(f"Restarting Node - {host['name']} - {MY_HOST['name']}")
+                try:
+                    StartNode(host)
+                except Exception as ex:
+                    LOG_Exception(ex)
+    
+    if eldest and LAST_STATE != None:
+        for host, status in state:
+            last_status = None
+            for lhost, lstatus in LAST_STATE:
+                if lhost['ip'] == host['ip']:
+                    last_status = lstatus
+            if last_status == None:
+                raise Exception(f"No last state entry for {host['name']}")
+            changes = []
+            for key in status.keys():
+                if status[key] != last_status[key]:
+                    changes.append(f"{key}: {last_status[key]}=>{status[key]}")
+            if len(changes) > 0:
+                LOG_Info(f"State Change - {host['name']} - {' - '.join(changes)}")
+    LAST_STATE = state
 async def Run():
     server = await asyncio.start_server(HandleRequest, "0.0.0.0", ENV['cluster_port'])
     try:
-        LOG_Info(f"Cluster Join - {MY_HOST['name']}")
+        LOG_Info(f"Joining Cluster - {MY_HOST['name']}")
         while True:
             try:
-                await Heartbeat()
-                await asyncio.sleep(ENV['cluster_interval'])
+                await RunUpdate()
             except Exception as ex:
                 LOG_Exception(ex)
+            await asyncio.sleep(ENV['cluster_interval'])
     finally:
         try:
             if CheckService():
@@ -230,31 +261,37 @@ async def Run():
 async def Start():
     for host in ENV['cluster_hosts']:
         status = await GetHostStatus(host)
-        if status['reachable'] and not status['node_up']:
-            print(f"Starting {host['name']}...")
-            StartNode(host)
-            await asyncio.sleep(0.25)
-    print("Started all hosts.")
+        if not status['reachable']:
+            print(f"{YELLOW}Host down {host['name']}...{RESET}")
+        elif status['node_up']:
+            print(f"{GREEN}Node already up {host['name']}...{RESET}")
+        else:
+            try:
+                StartNode(host)
+                print(f"{BLUE}Started {host['name']}...{RESET}")
+            except Exception as ex:
+                print(f"{RED}Failed to start host {host['name']}{RESET}")
+                print(f"{ex}")
 async def Stop():
     print("Disabling restart...")
     for host in ENV['cluster_hosts']:
         try:
             await SendRequest(host, "no_restart")
-        except:
-            pass
+            print(f"{BLUE}Disabled restart {host['name']}...{RESET}")
+        except ConnectionRefusedError:
+            print(f"{GREEN}Already stopped {host['name']}...{RESET}")
+            pass # Already Stopped or Service Unreachable
+    print()
+
     print("Stopping cluster nodes...")
     for host in ENV['cluster_hosts']:
         try:
             await SendRequest(host, "stop")
-        except:
-            pass
-    print("Cluster has been stopped.")
+            print(f"{BLUE}Stopped {host['name']}...{RESET}")
+        except ConnectionRefusedError:
+            print(f"{GREEN}Already stopped {host['name']}...{RESET}")
+            pass # Already Stopped or Service Unreachable
 async def Status():
-    BLUE = "\033[1;34m"
-    GREEN = "\033[1;32m"
-    YELLOW = "\033[1;33m"
-    RED = "\033[1;31m"
-    RESET = "\033[0m"
     for host in ENV['cluster_hosts']:
         status = await GetHostStatus(host)
         if status['reachable'] and status['node_up'] and status['service_up'] and math.isfinite(status['birth']) and status['birth'] > 0 and not status['no_restart']:
@@ -273,16 +310,16 @@ async def Status():
 async def Main():
     try:
         ENV_Load()
-        if len(sys.argv) == 2 and sys.argv[1] == "run":
+        if len(sys.argv) == 2 and sys.argv[1].lower() == "run":
             await Run()
-        elif len(sys.argv) == 2 and sys.argv[1] == "start":
+        elif len(sys.argv) == 2 and sys.argv[1].lower() == "start":
             await Start()
-        elif len(sys.argv) == 2 and sys.argv[1] == "stop":
+        elif len(sys.argv) == 2 and sys.argv[1].lower() == "stop":
             await Stop()
-        elif len(sys.argv) == 2 and sys.argv[1] == "status":
+        elif len(sys.argv) == 2 and sys.argv[1].lower() == "status":
             await Status()
         else:
-            raise Exception("No verb specified. Try \"pycluster start\".")
+            raise Exception("No verb specified or unknown verb. Try \"./Cluster.py Start\".")
         sys.exit(0)
     except KeyboardInterrupt:
         sys.exit(0)

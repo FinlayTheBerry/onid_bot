@@ -16,6 +16,7 @@ import hashlib
 import base64
 import secrets
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+import shlex
 
 # Bot authentication url:
 # https://discord.com/oauth2/authorize?client_id={CLIENTID}
@@ -69,7 +70,7 @@ def IO_FormatEpoch(epoch):
 def LOG_Generic(message, log_type, ansi_color):
     formatted_message = f"{log_type} - {IO_FormatEpoch(IO_GetEpoch())} {int(IO_GetEpoch())} - {message}"
     print(f"\033[{ansi_color}m{formatted_message}\033[0m", flush=True)
-    log_path = os.path.join(IO_GetEnvironmentDir(), "log.txt")
+    log_path = os.path.join(IO_GetEnvironmentDir(), "ONIDbot.log")
     if not os.path.exists(log_path):
         IO_CreateFile(log_path, f"{formatted_message}\n", 0o600)
     else:
@@ -81,6 +82,8 @@ def LOG_Warning(message):
 def LOG_Error(message):
     LOG_Generic(message, "ERROR", "31")
 def LOG_Exception(ex):
+    LOG_Generic(LOG_FormatException(ex), "PY_EX", "31")
+def LOG_FormatException(ex):
     tb = ex.__traceback__
     tb_data = None
     while tb is not None:
@@ -92,9 +95,9 @@ def LOG_Exception(ex):
             tb_data = { "message": message, "funcname": funcname, "lineno": lineno, "line": line }
         tb = tb.tb_next
     if tb_data == None:
-        LOG_Generic(f"{repr(ex)} at unknown location", "PY_EX", "31")
+        return f"{repr(ex)} at unknown location"
     else:
-        LOG_Generic(f"{tb_data['message']} in {tb_data['funcname']} line {tb_data['lineno']}: {tb_data['line']}", "PY_EX", "31")
+        return f"{tb_data['message']} in {tb_data['funcname']} line {tb_data['lineno']}: {tb_data['line']}"
 # endregion
 
 # region Environment
@@ -375,93 +378,130 @@ async def DIS_GetVerificationInfo(interaction: discord.Interaction, user: discor
             return
     except Exception as ex:
         LOG_Exception(ex)
-@discord_command_tree.command(name="debug_verification", description="Used to debug ONIDbot. Restricted to ONIDbot developers only.")
-async def DIS_DebugVerification(interaction: discord.Interaction, command: str):
+# endregion
+
+# region Discord Debug Interface
+@discord_command_tree.command(name="debug", description="Used to debug ONIDbot. Restricted to ONIDbot developers only.")
+async def DIS_Debug(interaction: discord.Interaction, command: str):
     try:
         await interaction.response.defer(ephemeral=True)
         if not interaction.user.id in ENV["debug_user_ids"]:
-            LOG_Info(f"Debug - Untrusted User - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)}")
+            LOG_Info(f"Debug - Untrusted User - {DIS_FormatUser(interaction.user)} - {DIS_FormatGuild(interaction.guild)} - \"{command}\"")
             await interaction.followup.send("You must be an ONIDbot developer to run this command.", ephemeral=True)
             return
 
         try:
-            command = command.split(" ", maxsplit=1)
-            verb = command[0].lower()
-            args = None
-            if len(command) > 1:
-                args = command[1]
-
-            if verb == "rename_role":
-                discord_guild_id = args.split(" ", maxsplit=1)[0]
-                guild = await DIS_FetchGuild(discord_guild_id)
-                for role in guild.roles:
-                    if role.name == "ONID-Verified":
-                        await role.edit(name="Verified")
-                        await interaction.followup.send("Done!", ephemeral=True)
-                        return
-                await interaction.followup.send("No role with target name :(", ephemeral=True)
-            elif verb == "token_info":
-                data = TOKEN_DeserializeAndVerify(args)
-                await interaction.followup.send(IO_SerializeJson(data), ephemeral=True)
-            elif verb == "db_unverify":
-                if not int(args) in DB:
-                    raise Exception(f"{int(args)} not in DB.")
-                del DB[int(args)]
-                DB_Save()
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "manual_verify":
-                discord_user_id, discord_guild_id, onid_email, onid_name = args.split(" ", maxsplit=3)
-                response = await DIS_Verify(discord_user_id, discord_guild_id, onid_email, onid_name)
-                if response != None:
-                    raise Exception(response)
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "dis_get_guild":
-                discord_guild = await discord_client.fetch_guild(int(args))
-                await interaction.followup.send(DIS_FormatGuild(discord_guild), ephemeral=True)
-            elif verb == "dis_get_channel":
-                discord_channel = await discord_client.fetch_channel(int(args))
-                await interaction.followup.send(DIS_FormatChannel(discord_channel), ephemeral=True)
-            elif verb == "dis_get_user":
-                discord_user = await discord_client.fetch_user(int(args))
-                await interaction.followup.send(DIS_FormatUser(discord_user), ephemeral=True)
-            elif verb == "dis_rm_message":
-                discord_channel_id, discord_message_id = args.split(" ")
-                discord_channel = await discord_client.fetch_channel(int(discord_channel_id))
-                discord_message = await discord_channel.fetch_message(int(discord_message_id))
-                await discord_message.delete()
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "dis_post_button":
-                discord_channel = await discord_client.fetch_channel(int(args))
-                await discord_channel.send("", view=GetVerifiedView())
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "dis_post_instructions":
-                discord_channel = await discord_client.fetch_channel(int(args))
-                message = f"Welcome to the {interaction.guild.name} Discord server!\n\n:shield: To gain access to the rest of the server, you must **verify** your status as an OSU student.\n\n:one: Enter your **@oregonstate.edu** email address and wait for a confirmation email.\n:two: Next, click the provided link and the rest of the server will be **unlocked** for you.\n\n:interrobang: If you need help, feel free to DM me (<@{discord_client.application.owner.id}>) anytime."
-                await discord_channel.send(message, view=GetVerifiedView())
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "osu_api_lookup":
-                data = OSU_LookupOnidName(args)
-                await interaction.followup.send(data, ephemeral=True)
-            elif verb == "env_reload":
-                ENV_Load()
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "db_get":
-                await interaction.followup.send(IO_SerializeJson(DB[int(args)]), ephemeral=True)
-            elif verb == "db_reload":
-                DB_Load()
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "db_save":
-                DB_Save()
-                await interaction.followup.send("Done!", ephemeral=True)
-            elif verb == "db_backup":
-                DB_Backup()
-                await interaction.followup.send("Done!", ephemeral=True)
-            else:
-                raise Exception(f"Unknown verb {verb}.")
+            lexer = shlex.shlex(command, posix=True)
+            lexer.whitespace_split = True
+            command_split = list(lexer)
+            primary_verb = command_split[0] if len(command_split) > 0 else ""
+            secondary_verb = command_split[1] if len(command_split) > 1 else ""
+            args = command_split[2:] if len(command_split) > 2 else []
+            response = await DIS_Debug_Run(primary_verb, secondary_verb, args)
+            await interaction.followup.send(response, ephemeral=True)
         except Exception as ex:
-            await interaction.followup.send(repr(ex), ephemeral=True)
+            await interaction.followup.send(f"PY_EX - {LOG_FormatException(ex)}", ephemeral=True)
+
     except Exception as ex:
         LOG_Exception(ex)
+async def DIS_Debug_Run(primary_verb, secondary_verb, args):
+    if primary_verb == "db":
+        if secondary_verb == "load":
+            DB_Load()
+            return "Done!"
+        elif secondary_verb == "save":
+            DB_Save()
+            return "Done!"
+        elif secondary_verb == "backup":
+            DB_Backup()
+            return "Done!"
+        elif secondary_verb == "rm":
+            if int(args[0]) in DB:
+                del DB[int(args[0])]
+                DB_Save()
+            return "Done!"
+        elif secondary_verb == "get":
+            if int(args[0]) in DB:
+                return IO_SerializeJson(DB[int(args[0])])
+            else:
+                return f"{int(args[0])} not in DB."
+    elif primary_verb == "":
+        return f"ERROR - No primary verb provided."
+    else:
+        return f"ERROR - Unknown primary verb \"{primary_verb}\"."
+    if secondary_verb == "":
+        return f"ERROR - No secondary verb provided."
+    else:
+        return f"ERROR - Unknown secondary verb \"{secondary_verb}\"."
+"""
+    if verb == "rename_role":
+        discord_guild_id = args[0]
+        guild = await DIS_FetchGuild(discord_guild_id)
+        for role in guild.roles:
+            if role.name == "ONID-Verified":
+                await role.edit(name="Verified")
+                await interaction.followup.send("Done!", ephemeral=True)
+                return
+        await interaction.followup.send("No role with target name :(", ephemeral=True)
+    elif verb == "token_info":
+        data = TOKEN_DeserializeAndVerify(args)
+        await interaction.followup.send(IO_SerializeJson(data), ephemeral=True)
+    elif verb == "db_unverify":
+        if not int(args) in DB:
+            raise Exception(f"{int(args)} not in DB.")
+        del DB[int(args)]
+        DB_Save()
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "manual_verify":
+        discord_user_id, discord_guild_id, onid_email, onid_name = args.split(" ", maxsplit=3)
+        response = await DIS_Verify(discord_user_id, discord_guild_id, onid_email, onid_name)
+        if response != None:
+            raise Exception(response)
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "dis_get_guild":
+        discord_guild = await discord_client.fetch_guild(int(args))
+        await interaction.followup.send(DIS_FormatGuild(discord_guild), ephemeral=True)
+    elif verb == "dis_get_channel":
+        discord_channel = await discord_client.fetch_channel(int(args))
+        await interaction.followup.send(DIS_FormatChannel(discord_channel), ephemeral=True)
+    elif verb == "dis_get_user":
+        discord_user = await discord_client.fetch_user(int(args))
+        await interaction.followup.send(DIS_FormatUser(discord_user), ephemeral=True)
+    elif verb == "dis_rm_message":
+        discord_channel_id, discord_message_id = args.split(" ")
+        discord_channel = await discord_client.fetch_channel(int(discord_channel_id))
+        discord_message = await discord_channel.fetch_message(int(discord_message_id))
+        await discord_message.delete()
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "dis_post_button":
+        discord_channel = await discord_client.fetch_channel(int(args))
+        await discord_channel.send("", view=GetVerifiedView())
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "dis_post_instructions":
+        discord_channel = await discord_client.fetch_channel(int(args))
+        message = f"Welcome to the {interaction.guild.name} Discord server!\n\n:shield: To gain access to the rest of the server, you must **verify** your status as an OSU student.\n\n:one: Enter your **@oregonstate.edu** email address and wait for a confirmation email.\n:two: Next, click the provided link and the rest of the server will be **unlocked** for you.\n\n:interrobang: If you need help, feel free to DM me (<@{discord_client.application.owner.id}>) anytime."
+        await discord_channel.send(message, view=GetVerifiedView())
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "osu_api_lookup":
+        data = OSU_LookupOnidName(args)
+        await interaction.followup.send(data, ephemeral=True)
+    elif verb == "env_reload":
+        ENV_Load()
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "db_get":
+        await interaction.followup.send(IO_SerializeJson(DB[int(args)]), ephemeral=True)
+    elif verb == "db_reload":
+        DB_Load()
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "db_save":
+        DB_Save()
+        await interaction.followup.send("Done!", ephemeral=True)
+    elif verb == "db_backup":
+        DB_Backup()
+        await interaction.followup.send("Done!", ephemeral=True)
+    else:
+        raise Exception(f"Unknown verb {verb}.")
+"""
 # endregion
 
 # region API Server
