@@ -1,8 +1,8 @@
 environment.json
 database.json
-log.txt
-cgi_log.txt
-msauth_token
+Cluster.log
+ONIDbot.log
+Verify.log
 env/
 __pycache__/
 backups/
