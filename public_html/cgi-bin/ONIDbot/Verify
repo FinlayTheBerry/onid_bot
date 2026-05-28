@@ -81,7 +81,7 @@ def IO_FormatEpoch(epoch):
 # region Logs
 def LOG_Generic(message, log_type):
     formatted_message = "{} - {} {} - {}".format(log_type, IO_FormatEpoch(IO_GetEpoch()), int(IO_GetEpoch()), message)
-    log_path = os.path.join(IO_GetEnvironmentDir(), "log.txt")
+    log_path = os.path.join(IO_GetEnvironmentDir(), "Verify.log")
     if not os.path.exists(log_path):
         IO_CreateFile(log_path, "{}\n".format(formatted_message), 0o600)
     else:
