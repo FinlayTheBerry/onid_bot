@@ -158,10 +158,18 @@ def OSU_LookupOnidName(onid_email):
 
     # Return output or None
     if len(data) == 1:
-        output = f"{data[0]['attributes']['firstName']} {data[0]['attributes']['lastName']}"
-        return output
+        return f"{data[0]['attributes']['firstName']} {data[0]['attributes']['lastName']}"
     else:
-        return None
+        # Send another request
+        headers = { "Authorization": f"Bearer {token}", "Accept": "application/json" }
+        onid_username = onid_email.removesuffix("@oregonstate.edu")
+        response = requests.get(f"https://api.oregonstate.edu/v2/directory?filter[onid]={onid_username}", headers=headers)
+        response.raise_for_status()
+        data = response.json()['data']
+        if len(data) == 1:
+            return f"{data[0]['attributes']['firstName']} {data[0]['attributes']['lastName']}"
+        else:
+            return None
 # endregion
 
 # region COE SMTP
@@ -425,6 +433,9 @@ async def DIS_Debug_Run(primary_verb, secondary_verb, args):
                 return IO_SerializeJson(DB[int(args[0])])
             else:
                 return f"{int(args[0])} not in DB."
+    elif primary_verb == "osu":
+        if secondary_verb == "lookup":
+            return OSU_LookupOnidName(args[0])
     elif primary_verb == "":
         return f"ERROR - No primary verb provided."
     else:

@@ -7,3 +7,7 @@ env/
 __pycache__/
 backups/
 .git/
+
+Server.py
+public_html/cgi-bin/ONIDbot/Client
+public_html/cgi-bin/ONIDbot/Wrapper
