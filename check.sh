@@ -43,6 +43,6 @@ echo ""
 ./Cluster.py status
 echo ""
 
-LAST_BACKUP=$(ls -S ./backups/ | head -n 1 | sed 's/\.json$//')
+LAST_BACKUP=$(ls -S ./backups/ | sort | tail -n 1 | sed 's/\.json$//')
 echo "Last backup - $(date -d @$LAST_BACKUP)" - $(python -c "import time; print(format((time.time() - $LAST_BACKUP) / 86400, '.2f'))") days ago
 echo ""
