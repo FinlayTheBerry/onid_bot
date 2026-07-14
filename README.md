@@ -1,9 +1,9 @@
 # WHAT IS ONIDbot?
-🛡️ ONIDbot is a free and [open-source](https://github.com/FinlayTheBerry/ONIDbot) Discord bot that verifies your server's members using their [onid@oregonstate.edu](https://onid.oregonstate.edu) email addresses.  
+🛡️ ONIDbot is a Discord bot that verifies Oregon State University students by their [onid@oregonstate.edu](https://onid.oregonstate.edu) email address.  
 👨‍💻 ONIDbot was developed by Finlay Christ, a cybersecurity major and president of the OSU Rock Climbing Club.  
 🗓️ ONIDbot has been protecting clubs at Oregon State University since 9/26/2025.  
 📈 ONIDbot has verified over 250 students and has blocked dozens of scammers and creeps.  
-🫶 ONIDbot proudly protects the OSU Rock Climbing Club, OSU Hiking Club, OSU Conservation Club, and OSU App Development Club.  
+🫶 ONIDbot proudly protects the OSU Rock Climbing Club, OSU Hiking Club, OSU Conservation Club, OSU Cheese Club, OSU Steel Bridge Club, and OSU App Development Club.  
 
 # WHY USE ONIDbot?
 Posting your club's Discord server invite to social media is a great way to grow your community, but as soon as that link becomes public, anyone can join. OSU clubs specifically have seen a massive increase in scammers and creeps. ONIDbot keeps your club members safe by restricting the access given to non-students.  
@@ -57,5 +57,5 @@ A: Send a Discord DM to @finlaytheberry or an email to [christj@oregonstate.edu]
 # 🔒 PRIVACY STATEMENT
 ONIDbot stores the following information about you after verification: your ONID email address, your full name, and your Discord user ID.  
 ONIDbot also collects logs which may include additional data relating to your interactions with the software.  
-You can request the deletion of this data at any time by emailing [christj@oregonstate.edu](mailto:christj@oregonstate.edu).  
+You can request a copy of your data and/or request the deletion of your data at any time by emailing [christj@oregonstate.edu](mailto:christj@oregonstate.edu).  
 I respect your right to privacy. If you have additional questions or concerns, please reach out to [christj@oregonstate.edu](mailto:christj@oregonstate.edu).

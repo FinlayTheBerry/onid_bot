@@ -2,7 +2,6 @@
 
 # WRITTEN FOR PYTHON VERSION 2.7.5
 
-import socket
 import errno
 import os
 import sys
@@ -11,12 +10,16 @@ import codecs
 import io
 import datetime
 import time
+import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.poolmanager import PoolManager
+import errno
 
 # region File IO
 def IO_RealPath(filePath):
     return os.path.realpath(os.path.expanduser(filePath))
 def IO_GetEnvironmentDir():
-    ENV_NAME = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+    ENV_NAME = os.getenv("ENV_NAME", os.path.basename(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join("/nfs/stak/users/christj/", ENV_NAME)
 def IO_WriteFile(filePath, contents, binary=False):
     filePath = IO_RealPath(filePath)
@@ -74,14 +77,13 @@ def IO_GetEpoch():
     return time.time()
 def IO_FormatEpoch(epoch):
     timestamp = datetime.datetime.fromtimestamp(epoch)
-    formatted = timestamp.strftime("%I:%M%p %m/%d").lower()
-    return formatted.decode("utf-8")
+    return timestamp.strftime("%I:%M%p %m/%d").lower()
 # endregion
 
 # region Logs
 def LOG_Generic(message, log_type):
     formatted_message = "{} - {} {} - {}".format(log_type, IO_FormatEpoch(IO_GetEpoch()), int(IO_GetEpoch()), message)
-    log_path = os.path.join(IO_GetEnvironmentDir(), "Verify.log")
+    log_path = os.path.join(IO_GetEnvironmentDir(), "API.log")
     if not os.path.exists(log_path):
         IO_CreateFile(log_path, "{}\n".format(formatted_message), 0o600)
     else:
@@ -118,36 +120,36 @@ def ENV_Load():
 # endregion
 
 def Main():
-    code = os.environ.get("QUERY_STRING", "").replace("\n", "").replace("\r", "")
-    for hostname in ENV["api_hosts"]:
-        sock = None
-        sockfile = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1.0) # Host needs to connect within 1 second
-            sock.connect((hostname, ENV["api_port"]))
-            sock.settimeout(30.0) # Host can have up to 30 seconds to reply once connected
-            sock.sendall((code + "\n").encode("utf-8"))
-            sockfile = sock.makefile("rb", 0)
-            return sockfile.readline(65536).decode("utf-8").rstrip("\n")
-        except socket.error as ex:
-            if ex.args[0] == errno.ECONNREFUSED:
-                continue
-            else:
-                raise ex
-        finally:
-            if sockfile:
-                sockfile.close()
-            if sock:
-                sock.close()
-    LOG_Error("CGI Main - All API cluster nodes are down!")
-    return IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue. Error details: All servers are down." }, compact=True)
+    class HostNameIgnoringAdapter(HTTPAdapter):
+        def init_poolmanager(self, connections, maxsize, block=False):
+            self.poolmanager = PoolManager(num_pools=connections, maxsize=maxsize, block=block, assert_hostname=False)
+    crt_path = os.path.join(IO_GetEnvironmentDir(), "ONIDbot.crt")
+    key_path = os.path.join(IO_GetEnvironmentDir(), "ONIDbot.key")
+    session = requests.Session()
+    session.mount("https://", HostNameIgnoringAdapter())
 
+    for api_host in ENV["api_hosts"]:
+        try:
+            url = "https://{}:{}/API?{}".format(api_host, ENV["api_port"], os.environ.get("QUERY_STRING", ""))
+            response = session.get(url, verify=crt_path, cert=(crt_path, key_path))
+            return response.text
+        except requests.exceptions.ConnectionError as ex:
+            try:
+                if ex[0][1].errno == errno.ECONNREFUSED:
+                    continue
+            except:
+                pass
+            raise ex
+    LOG_Error("CGI Main - All API cluster nodes are down!")
+    return IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue.<br />Error details: All servers are down. " + ENV["api_port"] }, compact=True)
+
+print("Status: 200")
 print("Content-Type: application/json")
 print("")
 try:
+    os.chdir(IO_GetEnvironmentDir())
     ENV_Load()
     print(Main())
 except Exception as ex:
     LOG_Exception(ex)
-    print(IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue. Error details: An internal server error occurred." }, compact=True))
+    print(IO_SerializeJson({ "state": "error", "title": "An Error Occurred", "message": "Please DM @finlaytheberry to report this issue.<br />Error details: An internal server error occurred." }, compact=True))

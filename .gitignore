@@ -2,12 +2,10 @@ environment.json
 database.json
 Cluster.log
 ONIDbot.log
-Verify.log
+API.log
 env/
 __pycache__/
 backups/
 .git/
-
-Server.py
-public_html/cgi-bin/ONIDbot/Client
-public_html/cgi-bin/ONIDbot/Wrapper
+ONIDbot.crt
+ONIDbot.key

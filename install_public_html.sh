@@ -1,7 +1,9 @@
 #!/bin/sh
 
 cd "$(dirname "$0")"
-ENV_NAME="$(basename $(pwd))"
+if [ -z "${ENV_NAME}" ]; then
+    ENV_NAME="$(basename $(pwd))"
+fi
 
 echo "Installing $(realpath ./public_html) to $(realpath ~/public_html) with ENV_NAME=$ENV_NAME..."
 mkdir -p ~/public_html/cgi-bin/
